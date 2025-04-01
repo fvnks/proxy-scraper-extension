@@ -20,8 +20,9 @@ const PROXY_SOURCES = [
 
 // Almacenamiento de proxies funcionando
 let workingProxies = [];
-let currentProxyIndex = 0;
+let currentProxyIndex = -1;
 let autoRotateInterval = null;
+let rotationInterval = 5; // Minutos entre rotaciones
 let proxyStatus = 'gray'; // gray, yellow, red, green
 
 // Inicializar extensión
@@ -31,35 +32,67 @@ chrome.runtime.onInstalled.addListener(() => {
       workingProxies = result.workingProxies;
       updateIconColor();
     }
+    if (result.rotationInterval) {
+      rotationInterval = result.rotationInterval;
+    }
     if (result.autoRotate) {
-      startAutoRotation(result.rotationInterval || 5);
+      startAutoRotation(rotationInterval);
     }
   });
 });
 
 // Actualizar color del icono según el estado del proxy
 async function updateIconColor() {
-  const iconSizes = [16, 48, 128];
-  const iconColors = {
-    gray: 'gray',
-    yellow: 'yellow',
-    red: 'red',
-    green: 'green'
-  };
-
-  const color = iconColors[proxyStatus];
-  
-  for (const size of iconSizes) {
-    const path = {
-      16: `images/icon16-${color}.png`,
-      48: `images/icon48-${color}.png`,
-      128: `images/icon128-${color}.png`
+  try {
+    // Usar los íconos estándar en lugar de intentar cargar íconos de color específicos
+    // que no están disponibles
+    const iconPath = {
+      16: 'icons/icon16.png',
+      48: 'icons/icon48.png',
+      128: 'icons/icon128.png'
     };
     
+    // Establecer el ícono estándar
     await chrome.action.setIcon({
-      path: path[size],
-      tabId: null
+      path: iconPath
     });
+    
+    // Establecer el título de la extensión según el estado
+    let title = "Proxy Scraper y Gestor";
+    
+    switch (proxyStatus) {
+      case 'green':
+        title += " - Conectado";
+        break;
+      case 'yellow':
+        title += " - Disponible";
+        break;
+      case 'red':
+        title += " - Error";
+        break;
+      default:
+        title += " - Inactivo";
+    }
+    
+    await chrome.action.setTitle({ title });
+    
+    // Guardar estado actual
+    const currentStatus = {
+      status: proxyStatus,
+      workingProxies: workingProxies,
+      currentProxy: currentProxyIndex >= 0 ? workingProxies[currentProxyIndex] : null,
+      autoRotate: autoRotateInterval !== null,
+      rotationInterval: autoRotateInterval ? autoRotateInterval / 60000 : 5
+    };
+    
+    // Guardar los datos en el storage
+    await chrome.storage.local.set({ 
+      currentStatus: currentStatus,
+      workingProxies: workingProxies 
+    });
+    
+  } catch (error) {
+    console.error('Error al actualizar el ícono:', error);
   }
 }
 
@@ -104,53 +137,97 @@ async function checkProxyStatus() {
 
 // Verificar si un proxy está funcionando
 async function verifyProxy(proxy) {
+  if (!chrome.proxy || !chrome.proxy.settings) {
+    console.error('La API de proxy no está disponible en este contexto de service worker');
+    return {
+      proxy,
+      working: false,
+      verified: false,
+      error: 'API de proxy no disponible'
+    };
+  }
+  
   const [host, port] = proxy.split(':');
   console.log(`Verificando proxy: ${proxy}`);
   
   try {
-    // Verificar con múltiples sitios para mayor confiabilidad
-    const testUrls = [
-      'https://api.ipify.org?format=json',
-      'https://www.google.com',
-      'https://www.cloudflare.com'
-    ];
-
+    // Intentar obtener datos a través del proxy configurando temporalmente
     let working = false;
     let ip = null;
     let locationData = null;
-
-    for (const url of testUrls) {
-      try {
-        const response = await fetch(url, {
-          proxy: `http://${host}:${port}`,
-          timeout: 5000,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-          }
-        });
-        
-        if (response.ok) {
-          working = true;
-          if (url.includes('ipify.org')) {
-            const data = await response.json();
-            ip = data.ip;
-            
-            // Obtener información de ubicación
-            try {
-              const locationResponse = await fetch(`https://ipapi.co/${ip}/json/`);
-              locationData = await locationResponse.json();
-              console.log(`Ubicación obtenida para ${proxy}: ${locationData.country_name}`);
-            } catch (locationError) {
-              console.log(`Error al obtener ubicación para ${proxy}:`, locationError);
+    
+    // Configurar proxy para la verificación
+    await new Promise((resolve) => {
+      chrome.proxy.settings.set({
+        value: {
+          mode: "fixed_servers",
+          rules: {
+            singleProxy: {
+              scheme: "http",
+              host: host,
+              port: parseInt(port)
             }
           }
-          break; // Si un sitio funciona, no necesitamos verificar los demás
+        },
+        scope: "regular"
+      }, () => {
+        if (chrome.runtime.lastError) {
+          console.error('Error al configurar proxy para verificación:', chrome.runtime.lastError);
         }
-      } catch (error) {
-        console.log(`Error al verificar ${proxy} con ${url}:`, error);
+        resolve();
+      });
+    });
+    
+    // Esperar un momento para que la configuración surta efecto
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Intentar cargar recursos a través del proxy
+    try {
+      // Usamos AbortController para limitar el tiempo de espera
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch('https://api.ipify.org?format=json', {
+        method: 'GET',
+        headers: {
+          'Cache-Control': 'no-cache'
+        },
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        working = true;
+        const data = await response.json();
+        ip = data.ip;
+        
+        // Obtener información de ubicación
+        try {
+          const locationController = new AbortController();
+          const locationTimeoutId = setTimeout(() => locationController.abort(), 3000);
+          
+          const locationResponse = await fetch(`https://ipapi.co/${ip}/json/`, {
+            signal: locationController.signal
+          });
+          
+          clearTimeout(locationTimeoutId);
+          
+          if (locationResponse.ok) {
+            locationData = await locationResponse.json();
+            console.log(`Ubicación obtenida para ${proxy}: ${locationData.country_name}`);
+          }
+        } catch (locationError) {
+          console.log(`Error al obtener ubicación para ${proxy}:`, locationError);
+        }
       }
+    } catch (error) {
+      console.log(`Error al verificar ${proxy}:`, error);
+    } finally {
+      // Restaurar la configuración original del proxy
+      await restoreProxySettings();
     }
-
+    
     if (working) {
       console.log(`Proxy ${proxy} verificado exitosamente, IP: ${ip}`);
       return {
@@ -166,6 +243,8 @@ async function verifyProxy(proxy) {
     }
   } catch (error) {
     console.log(`Error al verificar ${proxy}:`, error);
+    // Asegurarse de restaurar la configuración del proxy en caso de error
+    await restoreProxySettings();
   }
   
   return {
@@ -174,6 +253,34 @@ async function verifyProxy(proxy) {
     verified: true,
     error: 'Verificación fallida'
   };
+}
+
+// Restaurar configuración original del proxy
+async function restoreProxySettings() {
+  if (!chrome.proxy || !chrome.proxy.settings) {
+    console.error('La API de proxy no está disponible en este contexto');
+    return;
+  }
+  
+  try {
+    if (currentProxyIndex >= 0 && workingProxies.length > 0) {
+      updateProxyConfig();
+    } else {
+      await new Promise((resolve) => {
+        chrome.proxy.settings.set({
+          value: { mode: "direct" },
+          scope: "regular"
+        }, () => {
+          if (chrome.runtime.lastError) {
+            console.error('Error al restablecer proxy:', chrome.runtime.lastError);
+          }
+          resolve();
+        });
+      });
+    }
+  } catch (error) {
+    console.error('Error al restaurar configuración de proxy:', error);
+  }
 }
 
 // Verificar todos los proxies
@@ -297,16 +404,31 @@ async function toggleAutoRotate(enabled, interval) {
   return true;
 }
 
-// Iniciar rotación automática
-function startAutoRotation(interval) {
+// Activar la rotación automática
+function startAutoRotation(interval = null) {
   stopAutoRotation();
+  
+  if (interval) {
+    rotationInterval = interval;
+  }
+  
+  const intervalMs = rotationInterval * 60 * 1000; // Convertir minutos a milisegundos
+  
+  console.log(`Iniciando rotación automática cada ${rotationInterval} minutos (${intervalMs}ms)`);
+  
   autoRotateInterval = setInterval(() => {
     if (workingProxies.length > 0) {
       currentProxyIndex = (currentProxyIndex + 1) % workingProxies.length;
       updateProxyConfig();
       checkProxyStatus();
     }
-  }, interval * 60 * 1000);
+  }, intervalMs);
+  
+  // Guardar la configuración de rotación automática
+  chrome.storage.local.set({ 
+    autoRotate: true, 
+    rotationInterval: rotationInterval 
+  });
 }
 
 // Detener rotación automática
@@ -319,10 +441,19 @@ function stopAutoRotation() {
 
 // Actualizar configuración del proxy
 function updateProxyConfig() {
-  if (workingProxies.length === 0) {
+  if (!chrome.proxy || !chrome.proxy.settings) {
+    console.error('La API de proxy no está disponible en este contexto');
+    return;
+  }
+
+  if (workingProxies.length === 0 || currentProxyIndex < 0) {
     chrome.proxy.settings.set({
       value: { mode: "direct" },
       scope: "regular"
+    }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Error al establecer proxy directo:', chrome.runtime.lastError);
+      }
     });
     return;
   }
@@ -342,6 +473,10 @@ function updateProxyConfig() {
       }
     },
     scope: "regular"
+  }, () => {
+    if (chrome.runtime.lastError) {
+      console.error('Error al establecer proxy:', chrome.runtime.lastError);
+    }
   });
 }
 
@@ -384,67 +519,123 @@ async function clearInactiveProxies() {
   return true;
 }
 
-// Escuchar mensajes del popup
+// Listener para mensajes del popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  switch (request.action) {
-    case 'scrapeProxies':
-      scrapeProxies().then(sendResponse);
-      return true;
-    case 'verifyProxies':
-      verifyProxies().then(sendResponse);
-      return true;
-    case 'clearProxies':
-      clearProxies().then(sendResponse);
-      return true;
-    case 'clearInactiveProxies':
-      clearInactiveProxies().then(sendResponse);
-      return true;
-    case 'toggleAutoRotate':
-      toggleAutoRotate(request.enabled, request.interval).then(sendResponse);
-      return true;
-    case 'getStatus':
-      sendResponse({
-        workingProxies,
-        currentProxy: workingProxies[currentProxyIndex],
-        autoRotate: !!autoRotateInterval,
-        status: proxyStatus
-      });
-      return true;
-    case 'setCurrentProxy':
-      setCurrentProxy(request.proxy).then(sendResponse);
-      return true;
-    case 'disconnectProxy':
-      disconnectProxy().then(sendResponse);
-      return true;
-    case 'checkForUpdates':
-      checkForUpdates(request.forceCheck || false).then(result => {
-        sendResponse(result);
-      }).catch(error => {
-        console.error('Error al verificar actualizaciones:', error);
-        sendResponse(false);
-      });
-      return true;
-    case 'downloadAndInstallUpdate':
-      downloadAndInstallUpdate().then(result => {
-        sendResponse(result);
-      }).catch(error => {
-        console.error('Error al descargar actualización:', error);
-        sendResponse(false);
-      });
-      return true;
+  console.log('Mensaje recibido:', request.action);
+  
+  try {
+    switch (request.action) {
+      case 'getStatus':
+        sendResponse(getStatus());
+        return true;
+        
+      case 'setCurrentProxy':
+        if (request.proxy) {
+          const proxyIndex = workingProxies.findIndex(p => p.proxy === request.proxy.proxy);
+          if (proxyIndex !== -1) {
+            currentProxyIndex = proxyIndex;
+            updateProxyConfig();
+            checkProxyStatus();
+            sendResponse(true);
+          } else {
+            sendResponse(false);
+          }
+        } else {
+          sendResponse(false);
+        }
+        return true;
+        
+      case 'verifyProxies':
+        scrapeAndVerifyProxies().then(() => {
+          sendResponse(true);
+        }).catch(error => {
+          console.error('Error en verifyProxies:', error);
+          sendResponse(false);
+        });
+        return true;
+        
+      case 'clearProxies':
+        clearProxies().then(() => {
+          sendResponse(true);
+        }).catch(error => {
+          console.error('Error en clearProxies:', error);
+          sendResponse(false);
+        });
+        return true;
+        
+      case 'clearInactiveProxies':
+        clearInactiveProxies().then(() => {
+          sendResponse(true);
+        }).catch(error => {
+          console.error('Error en clearInactiveProxies:', error);
+          sendResponse(false);
+        });
+        return true;
+        
+      case 'disconnectProxy':
+        disconnectProxy().then(() => {
+          sendResponse(true);
+        }).catch(error => {
+          console.error('Error en disconnectProxy:', error);
+          sendResponse(false);
+        });
+        return true;
+        
+      case 'toggleAutoRotate':
+        if (request.enabled) {
+          const interval = request.interval || rotationInterval;
+          startAutoRotation(interval);
+        } else {
+          stopAutoRotation();
+        }
+        sendResponse(true);
+        return true;
+        
+      case 'checkForUpdates':
+        checkForUpdates(request.forceCheck || false).then(result => {
+          sendResponse(result);
+        }).catch(error => {
+          console.error('Error al verificar actualizaciones:', error);
+          sendResponse(false);
+        });
+        return true;
+        
+      case 'downloadAndInstallUpdate':
+        downloadAndInstallUpdate().then(result => {
+          sendResponse(result);
+        }).catch(error => {
+          console.error('Error al descargar actualización:', error);
+          sendResponse(false);
+        });
+        return true;
+        
+      default:
+        console.warn('Acción desconocida:', request.action);
+        sendResponse({error: 'Acción desconocida'});
+        return false;
+    }
+  } catch (error) {
+    console.error('Error general al procesar mensaje:', error);
+    sendResponse({error: error.message || 'Error desconocido'});
+    return true;
   }
 });
 
-// Establecer proxy actual manualmente
-async function setCurrentProxy(proxy) {
-  const index = workingProxies.findIndex(p => p.proxy === proxy.proxy);
-  if (index !== -1) {
-    currentProxyIndex = index;
-    updateProxyConfig();
-    await checkProxyStatus();
-    return true;
-  }
-  return false;
+// Obtener el estado actual para el popup
+function getStatus() {
+  return {
+    status: proxyStatus,
+    workingProxies: workingProxies,
+    currentProxy: currentProxyIndex >= 0 && workingProxies.length > 0 ? workingProxies[currentProxyIndex] : null,
+    autoRotate: autoRotateInterval !== null,
+    rotationInterval: rotationInterval
+  };
+}
+
+// Función para parsear XML simple (reemplazo para DOMParser que no está disponible en service workers)
+function parseXML(xmlText) {
+  const parser = new DOMParser();
+  return parser.parseFromString(xmlText, 'text/xml');
 }
 
 // Función para verificar actualizaciones
@@ -461,7 +652,7 @@ async function checkForUpdates(forceCheck = false) {
         // Si ya revisamos hoy, no volvemos a verificar
         if (lastCheckDate.toDateString() === now.toDateString() && !forceCheck) {
           console.log('Ya se verificaron actualizaciones hoy.');
-          return;
+          return false;
         }
       }
     }
@@ -469,61 +660,93 @@ async function checkForUpdates(forceCheck = false) {
     // Guardamos la fecha de última verificación
     await chrome.storage.local.set({ lastUpdateCheck: new Date().toISOString() });
     
-    const updateUrl = 'https://raw.githubusercontent.com/rodrigod/proxy-scraper-extension/main/updates.xml';
-    const response = await fetch(updateUrl);
-    const xmlText = await response.text();
-    
-    // Parsear el XML
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
-    
-    // Obtener la versión más reciente
-    const updatecheck = xmlDoc.querySelector('updatecheck');
-    if (!updatecheck) throw new Error('No se encontró información de actualización');
-    
-    const latestVersion = updatecheck.getAttribute('version');
-    const downloadUrl = updatecheck.getAttribute('codebase');
-    
-    if (!latestVersion) throw new Error('No se encontró versión en el archivo de actualización');
-    
-    // Obtener la versión actual
-    const currentVersion = chrome.runtime.getManifest().version;
-    
-    console.log(`Versión actual: ${currentVersion}, Última versión: ${latestVersion}`);
-    
-    // Comparar versiones (simple por ahora, podría mejorarse con semver)
-    const isNewer = compareVersions(latestVersion, currentVersion) > 0;
-    
-    if (isNewer) {
-      console.log('¡Hay una nueva versión disponible!');
+    // Intentar obtener información de actualización del XML
+    try {
+      const updateUrl = 'https://raw.githubusercontent.com/fvnks/proxy-scraper-extension/main/updates.xml';
+      const response = await fetch(updateUrl);
       
-      // Guardar información de actualización
-      await chrome.storage.local.set({ 
-        updateAvailable: true, 
-        latestVersion: latestVersion,
-        downloadUrl: downloadUrl
-      });
-      
-      // Mostrar notificación solo si es una verificación automática
-      if (!forceCheck) {
-        chrome.notifications.create('update-available', {
-          type: 'basic',
-          iconUrl: '/icons/icon128.png',
-          title: 'Actualización Disponible',
-          message: `Hay una nueva versión disponible (v${latestVersion}). Haz clic para actualizar.`,
-          buttons: [
-            { title: 'Ver actualización' }
-          ]
-        });
+      if (!response.ok) {
+        throw new Error(`Error al obtener el archivo de actualizaciones (${response.status})`);
       }
-    } else {
-      console.log('Estás usando la versión más reciente.');
-      await chrome.storage.local.set({ updateAvailable: false });
+      
+      const xmlText = await response.text();
+      
+      // Extraer versión y URL de descarga del XML usando regex
+      const versionMatch = xmlText.match(/<updatecheck[^>]*version="([^"]*)"[^>]*>/i);
+      const urlMatch = xmlText.match(/<updatecheck[^>]*codebase="([^"]*)"[^>]*>/i);
+      
+      if (!versionMatch) {
+        // Si no podemos extraer la versión, guardamos que no hay actualización y terminamos
+        console.error('No se encontró información de versión en el XML');
+        await chrome.storage.local.set({ 
+          updateAvailable: false,
+          updateError: 'No se pudo extraer la versión del archivo de actualizaciones'
+        });
+        return false;
+      }
+      
+      const latestVersion = versionMatch[1];
+      const downloadUrl = urlMatch ? urlMatch[1] : 'https://github.com/fvnks/proxy-scraper-extension/releases';
+      
+      // Obtener la versión actual
+      const currentVersion = chrome.runtime.getManifest().version;
+      
+      console.log(`Versión actual: ${currentVersion}, Última versión: ${latestVersion}`);
+      
+      // Comparar versiones
+      const isNewer = compareVersions(latestVersion, currentVersion) > 0;
+      
+      if (isNewer) {
+        console.log('¡Hay una nueva versión disponible!');
+        
+        // Guardar información de actualización
+        await chrome.storage.local.set({ 
+          updateAvailable: true, 
+          latestVersion: latestVersion,
+          downloadUrl: downloadUrl
+        });
+        
+        // Mostrar notificación solo si es una verificación automática y la API está disponible
+        if (!forceCheck && chrome.notifications && typeof chrome.notifications.create === 'function') {
+          try {
+            chrome.notifications.create('update-available', {
+              type: 'basic',
+              iconUrl: '/icons/icon128.png',
+              title: 'Actualización Disponible',
+              message: `Hay una nueva versión disponible (v${latestVersion}). Haz clic para actualizar.`,
+              buttons: [
+                { title: 'Ver actualización' }
+              ]
+            });
+          } catch (notifError) {
+            console.error('Error al mostrar notificación:', notifError);
+          }
+        }
+        
+        return true;
+      } else {
+        console.log('Estás usando la versión más reciente.');
+        await chrome.storage.local.set({ 
+          updateAvailable: false,
+          latestVersion: latestVersion
+        });
+        return false;
+      }
+    } catch (fetchError) {
+      console.error('Error al obtener el archivo de actualizaciones:', fetchError);
+      await chrome.storage.local.set({ 
+        updateAvailable: false,
+        updateError: 'Error al obtener información de actualización'
+      });
+      return false;
     }
-    
-    return isNewer;
   } catch (error) {
-    console.error('Error al verificar actualizaciones:', error);
+    console.error('Error general al verificar actualizaciones:', error);
+    // En caso de cualquier error, asumimos que no hay actualizaciones
+    await chrome.storage.local.set({ 
+      updateAvailable: false,
+      updateError: error.message || 'Error desconocido'
+    });
     return false;
   }
 }
@@ -572,12 +795,20 @@ chrome.alarms.onAlarm.addListener(alarm => {
   }
 });
 
-// Listener para el clic en la notificación
-chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
-  if (notificationId === 'update-available' && buttonIndex === 0) {
-    downloadAndInstallUpdate();
-  }
-});
+// Listener para el clic en la notificación (verificar si existe primero)
+if (chrome.notifications && chrome.notifications.onButtonClicked) {
+  chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
+    if (notificationId === 'update-available' && buttonIndex === 0) {
+      downloadAndInstallUpdate();
+    }
+  });
+} else {
+  console.log('notifications.onButtonClicked no está disponible en este contexto');
+  // Alternativa: crear un listener para chrome.action.onClicked si es necesario
+  chrome.action.onClicked.addListener(() => {
+    checkForUpdates(true);
+  });
+}
 
 // Verificar actualizaciones al iniciar
 checkForUpdates(); 
