@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Proxy Scraper y Gestor",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Obtiene y verifica proxies HTTP para eludir restricciones",
   "author": "Rodrigo Droguett Stahr",
   "homepage_url": "https://github.com/fvnks/proxy-scraper-extension",

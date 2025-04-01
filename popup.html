@@ -22,6 +22,25 @@
       </div>
     </div>
 
+    <div class="ip-info-container">
+      <div class="ip-info">
+        <div class="ip-box">
+          <span class="ip-label"><i class="fas fa-user"></i> Tu IP:</span>
+          <span id="currentIP" class="ip-value">Cargando...</span>
+        </div>
+        <div class="ip-arrow">
+          <i class="fas fa-arrow-right"></i>
+        </div>
+        <div class="ip-box">
+          <span class="ip-label"><i class="fas fa-mask"></i> IP Proxy:</span>
+          <span id="proxyIP" class="ip-value">No conectado</span>
+        </div>
+      </div>
+      <button id="refreshIPBtn" class="refresh-btn">
+        <i class="fas fa-sync"></i> Actualizar IP
+      </button>
+    </div>
+
     <div class="current-proxy">
       <h3><i class="fas fa-wifi"></i> Proxy Actual</h3>
       <div id="currentProxy" class="proxy-box">

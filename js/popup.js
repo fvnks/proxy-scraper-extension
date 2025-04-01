@@ -19,6 +19,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const currentVersionElement = document.getElementById('currentVersion');
   const updateLink = document.getElementById('updateLink');
   const latestVersionElement = document.getElementById('latestVersion');
+  const currentIPElement = document.getElementById('currentIP');
+  const proxyIPElement = document.getElementById('proxyIP');
+  const refreshIPBtn = document.getElementById('refreshIPBtn');
 
   // Función para obtener la bandera del país basada en el código ISO
   function getCountryFlag(countryCode) {
@@ -33,12 +36,22 @@ document.addEventListener('DOMContentLoaded', () => {
     return 'active';
   }
 
+  // Función para obtener el estado online
+  function getOnlineStatus(proxy) {
+    if (!proxy.verified) return 'unverified';
+    if (proxy.online === false) return 'offline';
+    if (proxy.online === true) return 'online';
+    return 'inactive';
+  }
+
   // Función para obtener el texto del estado
   function getStatusText(status) {
     switch (status) {
       case 'active': return 'Activo';
       case 'unverified': return 'Sin verificar';
       case 'inactive': return 'Inactivo';
+      case 'online': return 'Online';
+      case 'offline': return 'Offline';
       default: return 'Desconocido';
     }
   }
@@ -75,6 +88,75 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error('Error al obtener ubicación:', error);
       return null;
     }
+  }
+
+  // Función para obtener la IP real del usuario
+  async function getCurrentIP() {
+    try {
+      currentIPElement.textContent = 'Obteniendo...';
+      const response = await fetch('https://api.ipify.org?format=json');
+      if (response.ok) {
+        const data = await response.json();
+        currentIPElement.textContent = data.ip;
+        return data.ip;
+      } else {
+        currentIPElement.textContent = 'Error al obtener';
+        return null;
+      }
+    } catch (error) {
+      console.error('Error al obtener IP actual:', error);
+      currentIPElement.textContent = 'Error';
+      return null;
+    }
+  }
+
+  // Función para obtener la IP a través del proxy
+  async function getProxyIP() {
+    try {
+      proxyIPElement.textContent = 'Verificando...';
+      const status = await chrome.runtime.sendMessage({ action: 'getStatus' });
+      
+      if (!status.currentProxy) {
+        proxyIPElement.textContent = 'No conectado';
+        return null;
+      }
+      
+      // Verificar si el proxy tiene una IP detectada
+      if (status.currentProxy.ip) {
+        proxyIPElement.textContent = status.currentProxy.ip;
+        return status.currentProxy.ip;
+      }
+      
+      // Intentar obtener la IP actual, que si hay un proxy configurado
+      // debería ser la IP del proxy
+      const response = await fetch('https://api.ipify.org?format=json');
+      if (response.ok) {
+        const data = await response.json();
+        proxyIPElement.textContent = data.ip;
+        
+        // Actualizar el objeto proxy con la IP detectada
+        await chrome.runtime.sendMessage({ 
+          action: 'updateProxyIP',
+          proxyIdx: status.currentProxyIndex,
+          ip: data.ip
+        });
+        
+        return data.ip;
+      } else {
+        proxyIPElement.textContent = 'Error al verificar';
+        return null;
+      }
+    } catch (error) {
+      console.error('Error al obtener IP del proxy:', error);
+      proxyIPElement.textContent = 'Error';
+      return null;
+    }
+  }
+
+  // Función para actualizar las IPs
+  async function updateIPs() {
+    await getCurrentIP();
+    await getProxyIP();
   }
 
   // Función para actualizar el estado con mensaje detallado
@@ -163,6 +245,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Verificar actualizaciones
     await updateVersionInfo();
     
+    // Obtener IPs
+    await updateIPs();
+    
     // Actualizar estado y contador
     let statusMessage = 'Listo';
     let statusClass = 'idle';
@@ -210,8 +295,8 @@ document.addEventListener('DOMContentLoaded', () => {
             ${status.currentProxy.city ? `, ${status.currentProxy.city}` : ''}
           </div>
         </div>
-        <div class="proxy-status">
-          <span class="status-indicator active"></span>
+        <div class="proxy-status status-active">
+          <span class="status-indicator"></span>
           <span class="status-text">Conectado</span>
         </div>
       `;
@@ -243,6 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
       proxyElement.className = `proxy-item ${proxy.proxy === status.currentProxy?.proxy ? 'active' : ''}`;
       
       const proxyStatus = getProxyStatus(proxy);
+      const onlineStatus = getOnlineStatus(proxy);
       
       proxyElement.innerHTML = `
         <div class="proxy-info">
@@ -252,9 +338,10 @@ document.addEventListener('DOMContentLoaded', () => {
             ${proxy.country || 'Desconocido'}
           </div>
         </div>
-        <span class="proxy-status status-${proxyStatus}">
-          ${getStatusText(proxyStatus)}
-        </span>
+        <div class="proxy-status status-${proxyStatus === 'active' ? onlineStatus : proxyStatus}">
+          <span class="status-indicator"></span>
+          <span class="status-text">${getStatusText(proxyStatus === 'active' ? onlineStatus : proxyStatus)}</span>
+        </div>
       `;
 
       if (proxy.working) {
@@ -344,6 +431,9 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     updateManually();
   });
+  
+  // Evento para actualizar IPs
+  refreshIPBtn.addEventListener('click', updateIPs);
 
   autoRotateCheckbox.addEventListener('change', async () => {
     const enabled = autoRotateCheckbox.checked;

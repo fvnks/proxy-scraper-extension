@@ -285,84 +285,238 @@ async function restoreProxySettings() {
 
 // Verificar todos los proxies
 async function verifyProxies() {
-  console.log('Iniciando verificación de proxies...');
+  if (workingProxies.length === 0) {
+    return;
+  }
+
+  const verifiedProxies = [];
+  
+  for (const proxy of workingProxies) {
+    const verifiedProxy = await verifyProxy(proxy.proxy);
+    
+    // También verificar si está online
+    verifiedProxy.online = await checkProxyOnline(proxy.proxy);
+    
+    verifiedProxies.push(verifiedProxy);
+  }
+
+  workingProxies = verifiedProxies;
+  await saveProxies();
+  
+  if (currentProxyIndex >= workingProxies.length) {
+    currentProxyIndex = workingProxies.length - 1;
+  }
+  
+  updateProxyConfig();
+  checkProxyStatus();
+}
+
+// Verificar si un proxy está online
+async function checkProxyOnline(proxyStr) {
+  const [host, port] = proxyStr.split(':');
+  
+  try {
+    // Configurar el proxy
+    await new Promise((resolve) => {
+      chrome.proxy.settings.set({
+        value: {
+          mode: "fixed_servers",
+          rules: {
+            singleProxy: {
+              scheme: "http",
+              host: host,
+              port: parseInt(port)
+            }
+          }
+        },
+        scope: "regular"
+      }, () => {
+        if (chrome.runtime.lastError) {
+          console.error('Error al configurar proxy para verificación de estado online:', chrome.runtime.lastError);
+        }
+        resolve();
+      });
+    });
+    
+    // Esperar brevemente para que la configuración surta efecto
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Intentar acceder a un sitio de prueba
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
+      const response = await fetch('https://www.google.com', {
+        method: 'HEAD',
+        headers: {
+          'Cache-Control': 'no-cache'
+        },
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      // Restaurar configuración original
+      await restoreProxySettings();
+      
+      return response.ok;
+    } catch (error) {
+      console.log(`Error al verificar estado online del proxy ${proxyStr}:`, error);
+      
+      // Restaurar configuración original
+      await restoreProxySettings();
+      
+      return false;
+    }
+  } catch (error) {
+    console.error(`Error general al verificar estado online del proxy ${proxyStr}:`, error);
+    
+    // Restaurar configuración original en caso de error
+    await restoreProxySettings();
+    
+    return false;
+  }
+}
+
+// Función para obtener y verificar proxies
+async function scrapeAndVerifyProxies() {
+  console.log('Iniciando obtención y verificación de proxies...');
+  
+  // Obtener proxies de las fuentes
   const proxies = await scrapeProxies();
-  workingProxies = [];
+  console.log(`Obtenidos ${proxies.length} proxies de las fuentes`);
+  
+  // Verificar proxies
+  const newProxies = [];
   
   // Verificar solo los primeros 50 proxies para mayor velocidad
   const proxiesToCheck = proxies.slice(0, 50);
   
   for (const proxy of proxiesToCheck) {
-    const result = await verifyProxy(proxy);
-    if (result.working) {
-      workingProxies.push(result);
-      console.log(`Proxy ${proxy} agregado a la lista de funcionando`);
+    try {
+      const result = await verifyProxy(proxy);
+      
+      // Verificar también si está online
+      if (result.working) {
+        result.online = await checkProxyOnline(proxy);
+        newProxies.push(result);
+        console.log(`Proxy ${proxy} agregado a la lista de funcionando`);
+      }
+    } catch (error) {
+      console.error(`Error al verificar proxy ${proxy}:`, error);
+    }
+  }
+  
+  // Agregar los nuevos proxies a la lista de proxies existentes
+  for (const newProxy of newProxies) {
+    // Verificar si ya existe
+    const existingIndex = workingProxies.findIndex(p => p.proxy === newProxy.proxy);
+    if (existingIndex === -1) {
+      workingProxies.push(newProxy);
+    } else {
+      // Actualizar el proxy existente
+      workingProxies[existingIndex] = {
+        ...workingProxies[existingIndex],
+        ...newProxy,
+        verified: true
+      };
     }
   }
   
   console.log(`Total de proxies funcionando: ${workingProxies.length}`);
-  await chrome.storage.local.set({ workingProxies });
+  await saveProxies();
+  
   proxyStatus = workingProxies.length > 0 ? 'yellow' : 'gray';
   updateIconColor();
+  
   return workingProxies;
 }
 
-// Obtener proxies de las fuentes
+// Función para guardar los proxies en el almacenamiento local
+async function saveProxies() {
+  await chrome.storage.local.set({ workingProxies });
+}
+
+// Obtener proxies de todas las fuentes
 async function scrapeProxies() {
-  const proxies = new Set();
-  const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'Accept-Language': 'es-ES,es;q=0.8,en-US;q=0.5,en;q=0.3',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1',
-    'Cache-Control': 'no-cache'
-  };
+  console.log('Obteniendo proxies de las fuentes...');
+  const allProxies = new Set();
   
   for (const source of PROXY_SOURCES) {
     try {
-      console.log(`Intentando obtener proxies de: ${source}`);
+      console.log(`Obteniendo proxies de: ${source}`);
+      
       const response = await fetch(source, {
-        headers: headers,
-        mode: 'cors',
-        credentials: 'omit',
-        cache: 'no-store'
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1',
+          'Cache-Control': 'no-cache'
+        }
       });
       
       if (!response.ok) {
-        console.error(`Error al obtener ${source}: ${response.status}`);
+        console.error(`Error al obtener proxies de ${source}: ${response.status} ${response.statusText}`);
         continue;
       }
       
-      let text = await response.text();
-      console.log(`Respuesta recibida de ${source}, longitud: ${text.length}`);
+      const text = await response.text();
       
-      // Procesar el texto para encontrar proxies
-      const lines = text.split('\n');
-      for (const line of lines) {
-        const trimmedLine = line.trim();
-        // Buscar patrones de IP:puerto
-        const ipPortPattern = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s*:?\s*(\d+)/;
-        const match = trimmedLine.match(ipPortPattern);
+      if (text.length === 0) {
+        console.error(`Respuesta vacía de ${source}`);
+        continue;
+      }
+      
+      console.log(`Recibidos ${text.length} bytes de ${source}`);
+      
+      // Diferentes patrones para encontrar proxies en el texto
+      const patterns = [
+        /\b(?:\d{1,3}\.){3}\d{1,3}:\d{1,5}\b/g,                    // IP:PUERTO
+        /\b(?:\d{1,3}\.){3}\d{1,3}\s+\d{1,5}\b/g,                  // IP PUERTO
+        /"(?:\d{1,3}\.){3}\d{1,3}"\s*:\s*\d{1,5}/g,                // "IP": PUERTO
+        /'(?:\d{1,3}\.){3}\d{1,3}'\s*:\s*\d{1,5}/g,                // 'IP': PUERTO
+        /<td>\s*(?:\d{1,3}\.){3}\d{1,3}\s*<\/td>\s*<td>\s*\d{1,5}\s*<\/td>/g  // <td>IP</td><td>PUERTO</td>
+      ];
+      
+      for (const pattern of patterns) {
+        const matches = text.match(pattern) || [];
         
-        if (match) {
-          const [_, ip, port] = match;
-          // Validar que la IP y el puerto sean válidos
-          if (isValidIP(ip) && isValidPort(port)) {
-            proxies.add(`${ip}:${port}`);
+        for (let match of matches) {
+          // Limpiar el resultado según el patrón
+          if (pattern === patterns[0]) {
+            // IP:PUERTO - ya está en el formato correcto
+            allProxies.add(match);
+          } else if (pattern === patterns[1]) {
+            // IP PUERTO -> IP:PUERTO
+            match = match.replace(/\s+/, ':');
+            allProxies.add(match);
+          } else if (pattern === patterns[2] || pattern === patterns[3]) {
+            // "IP": PUERTO o 'IP': PUERTO -> IP:PUERTO
+            const parts = match.match(/['"]((?:\d{1,3}\.){3}\d{1,3})['"](?:\s*:\s*)(\d{1,5})/);
+            if (parts && parts.length >= 3) {
+              allProxies.add(`${parts[1]}:${parts[2]}`);
+            }
+          } else if (pattern === patterns[4]) {
+            // <td>IP</td><td>PUERTO</td> -> IP:PUERTO
+            const parts = match.match(/<td>\s*((?:\d{1,3}\.){3}\d{1,3})\s*<\/td>\s*<td>\s*(\d{1,5})\s*<\/td>/);
+            if (parts && parts.length >= 3) {
+              allProxies.add(`${parts[1]}:${parts[2]}`);
+            }
           }
         }
       }
       
-      console.log(`Proxies encontrados en ${source}: ${proxies.size}`);
+      console.log(`Encontrados ${allProxies.size} proxies hasta ahora`);
+      
     } catch (error) {
       console.error(`Error al obtener proxies de ${source}:`, error);
     }
   }
   
-  const proxyArray = Array.from(proxies);
-  console.log(`Total de proxies únicos encontrados: ${proxyArray.length}`);
-  return proxyArray;
+  return Array.from(allProxies);
 }
 
 // Validar IP
@@ -607,6 +761,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           console.error('Error al descargar actualización:', error);
           sendResponse(false);
         });
+        return true;
+        
+      case 'updateProxyIP':
+        // Actualizar la IP del proxy en el array de working proxies
+        if (request.proxyIdx >= 0 && request.proxyIdx < workingProxies.length && request.ip) {
+          workingProxies[request.proxyIdx].ip = request.ip;
+          chrome.storage.local.set({ workingProxies });
+          sendResponse(true);
+        } else {
+          sendResponse(false);
+        }
         return true;
         
       default:
