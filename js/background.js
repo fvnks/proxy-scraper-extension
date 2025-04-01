@@ -434,7 +434,7 @@ async function setCurrentProxy(proxy) {
 // Verificar actualizaciones
 async function checkForUpdates() {
   try {
-    const response = await fetch('https://raw.githubusercontent.com/rodrigod/proxy-scraper-extension/main/updates.xml');
+    const response = await fetch('https://raw.githubusercontent.com/fvnks/proxy-scraper-extension/main/updates.xml');
     const xmlText = await response.text();
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
@@ -445,16 +445,21 @@ async function checkForUpdates() {
       const currentVersion = chrome.runtime.getManifest().version;
       
       if (latestVersion && latestVersion !== currentVersion) {
-        // Mostrar notificación de actualización
-        chrome.notifications.create({
-          type: 'basic',
-          iconUrl: 'icons/icon128.png',
-          title: 'Nueva versión disponible',
-          message: `Hay una nueva versión (${latestVersion}) de Proxy Scraper y Gestor disponible.`,
-          buttons: [
-            { title: 'Actualizar' }
-          ]
-        });
+        // Verificar que el API de notificaciones esté disponible
+        if (chrome.notifications) {
+          // Mostrar notificación de actualización
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/icon128.png',
+            title: 'Nueva versión disponible',
+            message: `Hay una nueva versión (${latestVersion}) de Proxy Scraper y Gestor disponible.`,
+            buttons: [
+              { title: 'Actualizar' }
+            ]
+          });
+        } else {
+          console.log(`Nueva versión disponible: ${latestVersion}`);
+        }
       }
     }
   } catch (error) {
@@ -475,11 +480,13 @@ chrome.runtime.onStartup.addListener(() => {
   checkForUpdates();
 });
 
-// Escuchar clic en la notificación de actualización
-chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
-  if (buttonIndex === 0) {
-    chrome.tabs.create({
-      url: 'https://github.com/rodrigod/proxy-scraper-extension/releases'
-    });
-  }
-}); 
+// Escuchar clic en la notificación de actualización (solo si el API está disponible)
+if (chrome.notifications && chrome.notifications.onButtonClicked) {
+  chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
+    if (buttonIndex === 0) {
+      chrome.tabs.create({
+        url: 'https://github.com/fvnks/proxy-scraper-extension/releases'
+      });
+    }
+  });
+} 
