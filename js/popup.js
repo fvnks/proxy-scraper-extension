@@ -9,13 +9,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const statusMessageDisplay = document.getElementById('statusMessage');
   const proxyCountDisplay = document.getElementById('proxyCount');
   const inactiveCountDisplay = document.getElementById('inactiveCount');
+  const totalCountDisplay = document.getElementById('totalCount');
   const autoRotateCheckbox = document.getElementById('autoRotate');
   const rotationIntervalInput = document.getElementById('rotationInterval');
   const loadingElement = document.getElementById('loading');
   const loadingText = document.getElementById('loadingText');
+  const updateAvailableBadge = document.getElementById('updateAvailableBadge');
 
   // Función para obtener la bandera del país basada en el código ISO
   function getCountryFlag(countryCode) {
+    if (!countryCode) return 'https://flagcdn.com/24x18/un.png';
     return `https://flagcdn.com/24x18/${countryCode.toLowerCase()}.png`;
   }
 
@@ -23,13 +26,13 @@ document.addEventListener('DOMContentLoaded', () => {
   function getProxyStatus(proxy) {
     if (!proxy.verified) return 'unverified';
     if (!proxy.working) return 'inactive';
-    return 'verified';
+    return 'active';
   }
 
   // Función para obtener el texto del estado
   function getStatusText(status) {
     switch (status) {
-      case 'verified': return 'Verificado';
+      case 'active': return 'Activo';
       case 'unverified': return 'Sin verificar';
       case 'inactive': return 'Inactivo';
       default: return 'Desconocido';
@@ -71,16 +74,29 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Función para actualizar el estado con mensaje detallado
-  function updateStatus(message, status = null, detail = '') {
+  function updateStatus(message, status = 'idle', detail = '') {
     statusDisplay.textContent = message;
     statusMessageDisplay.textContent = detail;
     
     // Remover clases anteriores
-    statusDisplay.classList.remove('status-verified', 'status-unverified', 'status-inactive');
+    statusDisplay.classList.remove('status-connected', 'status-searching', 'status-error', 'status-idle');
     
     // Agregar nueva clase de estado
-    if (status) {
-      statusDisplay.classList.add(`status-${status}`);
+    statusDisplay.classList.add(`status-${status}`);
+  }
+
+  // Verificar si hay actualizaciones disponibles
+  async function checkForUpdates() {
+    try {
+      const updateInfo = await chrome.storage.local.get(['updateAvailable', 'latestVersion']);
+      if (updateInfo.updateAvailable) {
+        updateAvailableBadge.style.display = 'inline-block';
+        updateAvailableBadge.textContent = `Nueva v${updateInfo.latestVersion}`;
+      } else {
+        updateAvailableBadge.style.display = 'none';
+      }
+    } catch (error) {
+      console.error('Error al verificar actualizaciones:', error);
     }
   }
 
@@ -88,25 +104,28 @@ document.addEventListener('DOMContentLoaded', () => {
   async function updateUI() {
     const status = await chrome.runtime.sendMessage({ action: 'getStatus' });
     
+    // Verificar actualizaciones
+    await checkForUpdates();
+    
     // Actualizar estado y contador
     let statusMessage = 'Listo';
-    let statusClass = '';
+    let statusClass = 'idle';
     let statusDetail = '';
 
     switch (status.status) {
       case 'green':
         statusMessage = 'Conectado';
-        statusClass = 'verified';
+        statusClass = 'connected';
         statusDetail = `Usando proxy: ${status.currentProxy?.proxy || 'Ninguno'}`;
         break;
       case 'yellow':
         statusMessage = 'Disponible';
-        statusClass = 'unverified';
+        statusClass = 'searching';
         statusDetail = `${status.workingProxies.length} proxies disponibles`;
         break;
       case 'red':
-        statusMessage = 'Error de conexión';
-        statusClass = 'inactive';
+        statusMessage = 'Error';
+        statusClass = 'error';
         statusDetail = 'El proxy actual no está respondiendo';
         break;
       default:
@@ -122,52 +141,67 @@ document.addEventListener('DOMContentLoaded', () => {
     
     proxyCountDisplay.textContent = activeProxies.length;
     inactiveCountDisplay.textContent = inactiveProxies.length;
+    totalCountDisplay.textContent = status.workingProxies.length;
 
     // Actualizar proxy actual
     if (status.currentProxy) {
       currentProxyDisplay.innerHTML = `
         <div class="proxy-info">
-          <span class="proxy-address">${status.currentProxy.proxy}</span>
-          <span class="proxy-location">
-            <img class="flag" src="${getCountryFlag(status.currentProxy.countryCode || 'us')}" alt="${status.currentProxy.country || 'Unknown'}">
-            ${status.currentProxy.country || 'Unknown'}
-          </span>
+          <div class="proxy-address">${status.currentProxy.proxy}</div>
+          <div class="proxy-location">
+            <img class="flag" src="${getCountryFlag(status.currentProxy.countryCode)}" alt="${status.currentProxy.country || 'Desconocido'}">
+            ${status.currentProxy.country || 'Desconocido'}
+            ${status.currentProxy.city ? `, ${status.currentProxy.city}` : ''}
+          </div>
+        </div>
+        <div class="proxy-status">
+          <span class="status-indicator active"></span>
+          <span class="status-text">Conectado</span>
         </div>
       `;
       disconnectBtn.disabled = false;
     } else {
-      currentProxyDisplay.textContent = 'Sin proxy seleccionado';
+      currentProxyDisplay.innerHTML = `
+        <div class="proxy-info">
+          <div class="proxy-address">Sin proxy seleccionado</div>
+          <div class="proxy-ip">Conectado directamente</div>
+        </div>
+        <div class="proxy-status">
+          <span class="status-indicator"></span>
+          <span class="status-text">Desconectado</span>
+        </div>
+      `;
       disconnectBtn.disabled = true;
     }
 
     // Actualizar lista de proxies
     proxyList.innerHTML = '';
+    
+    if (status.workingProxies.length === 0) {
+      proxyList.innerHTML = '<div class="empty-list">No hay proxies disponibles. Haz clic en "Buscar Proxies" para encontrar nuevos proxies.</div>';
+      return;
+    }
+    
     for (const proxy of status.workingProxies) {
       const proxyElement = document.createElement('div');
       proxyElement.className = `proxy-item ${proxy.proxy === status.currentProxy?.proxy ? 'active' : ''}`;
       
       const proxyStatus = getProxyStatus(proxy);
-      const isOnline = await checkProxyOnline(proxy);
       
       proxyElement.innerHTML = `
         <div class="proxy-info">
-          <span class="proxy-address">${proxy.proxy}</span>
-          <span class="proxy-location">
-            <img class="flag" src="${getCountryFlag(proxy.countryCode || 'us')}" alt="${proxy.country || 'Unknown'}">
-            ${proxy.country || 'Unknown'}
-          </span>
+          <div class="proxy-address">${proxy.proxy}</div>
+          <div class="proxy-location">
+            <img class="flag" src="${getCountryFlag(proxy.countryCode)}" alt="${proxy.country || 'Desconocido'}">
+            ${proxy.country || 'Desconocido'}
+          </div>
         </div>
-        <div class="proxy-status-container">
-          <span class="proxy-status-badge status-${proxyStatus}">
-            ${getStatusText(proxyStatus)}
-          </span>
-          <span class="proxy-status-badge ${isOnline ? 'status-verified' : 'status-inactive'}">
-            ${isOnline ? 'Online' : 'Offline'}
-          </span>
-        </div>
+        <span class="proxy-status status-${proxyStatus}">
+          ${getStatusText(proxyStatus)}
+        </span>
       `;
 
-      if (proxy.working && isOnline) {
+      if (proxy.working) {
         proxyElement.addEventListener('click', () => selectProxy(proxy));
       }
       proxyList.appendChild(proxyElement);
@@ -182,7 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function selectProxy(proxy) {
     loadingElement.classList.add('active');
     loadingText.textContent = 'Conectando al proxy...';
-    updateStatus('Conectando...', 'unverified', `Intentando conectar a ${proxy.proxy}`);
+    updateStatus('Conectando...', 'searching', `Intentando conectar a ${proxy.proxy}`);
     
     try {
       const success = await chrome.runtime.sendMessage({
@@ -193,12 +227,12 @@ document.addEventListener('DOMContentLoaded', () => {
       if (success) {
         await updateUI();
       } else {
-        updateStatus('Error', 'inactive', 'No se pudo establecer la conexión');
+        updateStatus('Error', 'error', 'No se pudo establecer la conexión');
         alert('Error al conectar al proxy');
       }
     } catch (error) {
       console.error('Error al seleccionar proxy:', error);
-      updateStatus('Error', 'inactive', 'Error al conectar al proxy');
+      updateStatus('Error', 'error', 'Error al conectar al proxy');
       alert('Error al conectar al proxy');
     } finally {
       loadingElement.classList.remove('active');
@@ -209,15 +243,15 @@ document.addEventListener('DOMContentLoaded', () => {
   scrapeBtn.addEventListener('click', async () => {
     loadingElement.classList.add('active');
     loadingText.textContent = 'Buscando y verificando proxies...';
-    updateStatus('Buscando proxies...', 'unverified', 'Obteniendo lista de proxies disponibles');
+    updateStatus('Buscando proxies...', 'searching', 'Obteniendo lista de proxies disponibles');
     
     try {
-      updateStatus('Verificando proxies...', 'unverified', 'Comprobando funcionamiento de cada proxy');
+      updateStatus('Verificando proxies...', 'searching', 'Comprobando funcionamiento de cada proxy');
       await chrome.runtime.sendMessage({ action: 'verifyProxies' });
       await updateUI();
     } catch (error) {
       console.error('Error al buscar proxies:', error);
-      updateStatus('Error', 'inactive', 'No se pudieron obtener los proxies');
+      updateStatus('Error', 'error', 'No se pudieron obtener los proxies');
       alert('Error al buscar proxies');
     } finally {
       loadingElement.classList.remove('active');
@@ -226,7 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   clearInactiveBtn.addEventListener('click', async () => {
     if (confirm('¿Estás seguro de que quieres eliminar todos los proxies inactivos?')) {
-      updateStatus('Limpiando proxies...', 'unverified', 'Eliminando proxies que no responden');
+      updateStatus('Limpiando proxies...', 'searching', 'Eliminando proxies que no responden');
       await chrome.runtime.sendMessage({ action: 'clearInactiveProxies' });
       await updateUI();
     }
@@ -234,41 +268,51 @@ document.addEventListener('DOMContentLoaded', () => {
 
   clearBtn.addEventListener('click', async () => {
     if (confirm('¿Estás seguro de que quieres limpiar todos los proxies?')) {
-      updateStatus('Limpiando...', 'unverified', 'Eliminando todos los proxies');
+      updateStatus('Limpiando...', 'searching', 'Eliminando todos los proxies');
       await chrome.runtime.sendMessage({ action: 'clearProxies' });
       await updateUI();
     }
   });
 
   disconnectBtn.addEventListener('click', async () => {
-    updateStatus('Desconectando...', 'unverified', 'Volviendo a conexión directa');
+    updateStatus('Desconectando...', 'searching', 'Volviendo a conexión directa');
     await chrome.runtime.sendMessage({ action: 'disconnectProxy' });
     await updateUI();
   });
 
   autoRotateCheckbox.addEventListener('change', async () => {
     const enabled = autoRotateCheckbox.checked;
-    const interval = parseInt(rotationIntervalInput.value);
     rotationIntervalInput.disabled = !enabled;
     
-    await chrome.runtime.sendMessage({
-      action: 'toggleAutoRotate',
-      enabled: enabled,
-      interval: interval
-    });
-  });
-
-  rotationIntervalInput.addEventListener('change', async () => {
-    if (autoRotateCheckbox.checked) {
-      const interval = parseInt(rotationIntervalInput.value);
+    if (enabled) {
+      const interval = parseInt(rotationIntervalInput.value) || 5;
       await chrome.runtime.sendMessage({
         action: 'toggleAutoRotate',
         enabled: true,
-        interval: interval
+        interval
+      });
+    } else {
+      await chrome.runtime.sendMessage({
+        action: 'toggleAutoRotate',
+        enabled: false
       });
     }
   });
 
-  // Actualizar UI inicial
+  rotationIntervalInput.addEventListener('change', async () => {
+    if (autoRotateCheckbox.checked) {
+      const interval = parseInt(rotationIntervalInput.value) || 5;
+      await chrome.runtime.sendMessage({
+        action: 'toggleAutoRotate',
+        enabled: true,
+        interval
+      });
+    }
+  });
+
+  // Actualizar la interfaz al cargar
   updateUI();
+
+  // Verificar actualizaciones
+  checkForUpdates();
 }); 
