@@ -396,64 +396,118 @@ button.warning:hover {
   100% { transform: scale(1); }
 }
 
-/* Sección de actualización */
+/* Estilos para la sección de actualizaciones */
 .update-section {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background-color: #fff;
+  background-color: #f8f9fa;
   border-radius: 8px;
-  padding: 16px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-  margin-bottom: 10px;
+  padding: 10px 15px;
+  margin: 10px 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .version-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 14px;
-  color: #7f8c8d;
+  font-size: 12px;
+  color: #6c757d;
 }
 
 #updateLink {
-  color: #3498db;
-  text-decoration: none;
+  color: #007bff;
+  cursor: pointer;
   font-weight: 500;
   display: flex;
   align-items: center;
-  gap: 4px;
-  transition: all 0.2s ease;
+  margin-top: 4px;
 }
 
 #updateLink:hover {
-  color: #2980b9;
+  color: #0056b3;
   text-decoration: underline;
 }
 
-#updateLink i {
-  font-size: 12px;
+#updateLink .fas {
+  margin-right: 5px;
+  font-size: 14px;
 }
 
 #checkUpdateBtn {
-  background-color: #3498db;
+  padding: 8px 12px;
+  font-size: 13px;
 }
 
 #checkUpdateBtn:hover {
-  background-color: #2980b9;
+  background-color: #e6e6e6;
 }
 
 #checkUpdateBtn.checking {
-  background-color: #7f8c8d;
-  cursor: wait;
+  pointer-events: none;
+  opacity: 0.7;
 }
 
-/* Animación de actualización */
+#checkUpdateBtn.checking .fas {
+  animation: checking 1s infinite linear;
+}
+
 @keyframes checking {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
 
-#checkUpdateBtn.checking i {
-  animation: checking 1s linear infinite;
+/* Estilos para la sección del autor */
+.author-section {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #f1f1f1;
+  border-radius: 8px;
+  padding: 10px 15px;
+  margin: 10px 0;
+  border-top: 1px solid #e0e0e0;
+}
+
+.author-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 12px;
+  color: #666;
+}
+
+.author-info a {
+  color: #007bff;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.author-info a:hover {
+  text-decoration: underline;
+}
+
+.social-links {
+  display: flex;
+  margin-top: 5px;
+}
+
+.social-links a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background-color: #333;
+  color: white;
+  margin: 0 5px;
+  transition: all 0.2s ease;
+}
+
+.social-links a:hover {
+  background-color: #0366d6;
+  transform: scale(1.1);
+}
+
+.social-links i {
+  font-size: 16px;
 } 
