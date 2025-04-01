@@ -20,17 +20,46 @@ const PROXY_SOURCES = [
 
 // Almacenamiento de proxies funcionando
 let workingProxies = [];
-let currentProxyIndex = 0;
+let currentProxyIndex = -1; // Inicialmente sin proxy
 let autoRotateInterval = null;
 let proxyStatus = 'gray'; // gray, yellow, red, green
 
 // Inicializar extensión
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.get(['workingProxies', 'autoRotate', 'rotationInterval'], (result) => {
+  chrome.storage.local.get(['workingProxies', 'currentProxyIndex', 'autoRotate', 'rotationInterval'], (result) => {
     if (result.workingProxies) {
       workingProxies = result.workingProxies;
-      updateIconColor();
     }
+    
+    if (result.currentProxyIndex !== undefined) {
+      currentProxyIndex = result.currentProxyIndex;
+      // Restaurar la configuración del proxy
+      updateProxyConfig();
+    }
+    
+    updateIconColor();
+    
+    if (result.autoRotate) {
+      startAutoRotation(result.rotationInterval || 5);
+    }
+  });
+});
+
+// También restaurar al inicio del navegador
+chrome.runtime.onStartup.addListener(() => {
+  chrome.storage.local.get(['workingProxies', 'currentProxyIndex', 'autoRotate', 'rotationInterval'], (result) => {
+    if (result.workingProxies) {
+      workingProxies = result.workingProxies;
+    }
+    
+    if (result.currentProxyIndex !== undefined) {
+      currentProxyIndex = result.currentProxyIndex;
+      // Restaurar la configuración del proxy
+      updateProxyConfig();
+    }
+    
+    updateIconColor();
+    
     if (result.autoRotate) {
       startAutoRotation(result.rotationInterval || 5);
     }
@@ -65,14 +94,8 @@ async function updateIconColor() {
 
 // Verificar si el proxy actual está funcionando
 async function checkProxyStatus() {
-  if (workingProxies.length === 0) {
+  if (workingProxies.length === 0 || currentProxyIndex === -1 || currentProxyIndex >= workingProxies.length) {
     proxyStatus = 'gray';
-    updateIconColor();
-    return;
-  }
-
-  if (currentProxyIndex === -1) {
-    proxyStatus = 'yellow';
     updateIconColor();
     return;
   }
@@ -319,11 +342,14 @@ function stopAutoRotation() {
 
 // Actualizar configuración del proxy
 function updateProxyConfig() {
-  if (workingProxies.length === 0) {
+  if (workingProxies.length === 0 || currentProxyIndex === -1 || currentProxyIndex >= workingProxies.length) {
+    // No hay proxies o índice inválido, configurar a modo directo
     chrome.proxy.settings.set({
       value: { mode: "direct" },
       scope: "regular"
     });
+    proxyStatus = 'gray';
+    updateIconColor();
     return;
   }
   
@@ -343,6 +369,13 @@ function updateProxyConfig() {
     },
     scope: "regular"
   });
+  
+  // Actualizar el estado al conectar
+  proxyStatus = 'green';
+  updateIconColor();
+  
+  // Guardar el índice actual en el almacenamiento local
+  chrome.storage.local.set({ currentProxyIndex });
 }
 
 // Manejar errores de proxy
@@ -363,13 +396,19 @@ chrome.proxy.onProxyError.addListener((details) => {
 
 // Desconectar del proxy actual
 async function disconnectProxy() {
-  workingProxies = workingProxies.filter(p => p.proxy !== workingProxies[currentProxyIndex]?.proxy);
-  currentProxyIndex = -1;
-  proxyStatus = 'gray';
-  await chrome.storage.local.set({ workingProxies });
-  updateProxyConfig();
-  updateIconColor();
-  return true;
+  if (currentProxyIndex !== -1 && currentProxyIndex < workingProxies.length) {
+    // El proxy actual es válido, lo desconectamos
+    currentProxyIndex = -1;
+    proxyStatus = 'gray';
+    
+    // Guardar el cambio en el almacenamiento local
+    await chrome.storage.local.set({ currentProxyIndex });
+    
+    // Actualizar la configuración del proxy (conectará en modo directo)
+    updateProxyConfig();
+    return true;
+  }
+  return false;
 }
 
 // Limpiar proxies inactivos
@@ -424,6 +463,11 @@ async function setCurrentProxy(proxy) {
   const index = workingProxies.findIndex(p => p.proxy === proxy.proxy);
   if (index !== -1) {
     currentProxyIndex = index;
+    
+    // Guardar el índice actual en el almacenamiento local
+    await chrome.storage.local.set({ currentProxyIndex });
+    
+    // Actualizar la configuración del proxy
     updateProxyConfig();
     await checkProxyStatus();
     return true;
