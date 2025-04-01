@@ -9,7 +9,8 @@ Una extensión de Chrome para buscar, verificar y gestionar proxies HTTP.
 - Muestra la ubicación geográfica de cada proxy
 - Rotación automática de proxies
 - Interfaz intuitiva y fácil de usar
-- Verificación de actualizaciones automática
+- **Nuevo: Persistencia de conexión** - El proxy permanece conectado incluso al cerrar el popup
+- **Nuevo: Actualización automática** - La extensión puede actualizarse automáticamente cuando hay nuevas versiones
 
 ## Instalación
 
@@ -32,7 +33,23 @@ git clone https://github.com/fvnks/proxy-scraper-extension.git
 
 ## Actualizaciones
 
-La extensión verifica automáticamente si hay nuevas versiones disponibles. Cuando se encuentra una actualización, se mostrará una notificación.
+La extensión verifica automáticamente cada 6 horas si hay nuevas versiones disponibles. Cuando se encuentra una actualización, tienes tres opciones:
+
+1. **Actualizar ahora**: Te llevará a la página de descarga donde puedes obtener la última versión
+2. **Actualizar automáticamente**: Configura la extensión para que se actualice automáticamente en el futuro
+3. **Ignorar**: Puedes ignorar la notificación y actualizar más tarde
+
+Si has elegido la actualización automática, la extensión descargará e instalará automáticamente las nuevas versiones cuando estén disponibles.
+
+## Notas de la versión
+
+### Versión 1.0.1
+- El proxy permanece conectado incluso al cerrar el popup
+- Actualización automática de la extensión
+- Mejoras en la interfaz y corrección de errores
+
+### Versión 1.0.0
+- Versión inicial
 
 ## Contribuir
 

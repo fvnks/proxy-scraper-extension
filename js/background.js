@@ -478,6 +478,7 @@ async function setCurrentProxy(proxy) {
 // Verificar actualizaciones
 async function checkForUpdates() {
   try {
+    console.log("Verificando actualizaciones...");
     const response = await fetch('https://raw.githubusercontent.com/fvnks/proxy-scraper-extension/main/updates.xml');
     const xmlText = await response.text();
     const parser = new DOMParser();
@@ -487,50 +488,137 @@ async function checkForUpdates() {
     if (updateCheck) {
       const latestVersion = updateCheck.getAttribute('version');
       const currentVersion = chrome.runtime.getManifest().version;
+      const downloadUrl = updateCheck.getAttribute('codebase');
+      
+      console.log(`Versión actual: ${currentVersion}, Última versión: ${latestVersion}`);
       
       if (latestVersion && latestVersion !== currentVersion) {
+        // Guardar la información de actualización en almacenamiento local
+        await chrome.storage.local.set({ 
+          updateAvailable: true,
+          latestVersion: latestVersion,
+          downloadUrl: downloadUrl
+        });
+        
         // Verificar que el API de notificaciones esté disponible
         if (chrome.notifications) {
           // Mostrar notificación de actualización
-          chrome.notifications.create({
+          chrome.notifications.create('update-notification', {
             type: 'basic',
             iconUrl: 'icons/icon128.png',
             title: 'Nueva versión disponible',
             message: `Hay una nueva versión (${latestVersion}) de Proxy Scraper y Gestor disponible.`,
             buttons: [
-              { title: 'Actualizar' }
-            ]
+              { title: 'Actualizar ahora' },
+              { title: 'Actualizar automáticamente' }
+            ],
+            priority: 2,
+            requireInteraction: true
           });
         } else {
           console.log(`Nueva versión disponible: ${latestVersion}`);
         }
+        
+        // Cambiar el color del icono para indicar que hay una actualización
+        proxyStatus = 'yellow';
+        updateIconColor();
+        
+        return true;
+      } else {
+        await chrome.storage.local.set({ updateAvailable: false });
+        return false;
       }
     }
   } catch (error) {
     console.error('Error al verificar actualizaciones:', error);
+    return false;
   }
 }
 
-// Verificar actualizaciones cada 24 horas
-chrome.alarms.create('checkUpdates', { periodInMinutes: 1440 });
+// Descargar e instalar actualización
+async function downloadAndInstallUpdate() {
+  try {
+    const updateInfo = await chrome.storage.local.get(['downloadUrl']);
+    if (updateInfo.downloadUrl) {
+      // Abrir la página de descarga en una nueva pestaña
+      chrome.tabs.create({
+        url: updateInfo.downloadUrl
+      });
+      
+      // Mostrar instrucciones de instalación
+      if (chrome.notifications) {
+        chrome.notifications.create('install-instructions', {
+          type: 'basic',
+          iconUrl: 'icons/icon128.png',
+          title: 'Instrucciones de instalación',
+          message: 'Descarga la nueva versión y arrastra el archivo .crx a la página de extensiones de Chrome para instalarla. Si tienes problemas, descomprime el archivo y usa "Cargar descomprimida".',
+          priority: 2
+        });
+      }
+      
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('Error al descargar la actualización:', error);
+    return false;
+  }
+}
+
+// Verificar actualizaciones cada 6 horas en lugar de 24
+chrome.alarms.create('checkUpdates', { periodInMinutes: 360 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'checkUpdates') {
-    checkForUpdates();
+    checkForUpdates().then(hasUpdate => {
+      if (hasUpdate) {
+        // Verificar si el usuario eligió actualizaciones automáticas
+        chrome.storage.local.get(['autoUpdate'], result => {
+          if (result.autoUpdate) {
+            // Realizar actualización automática
+            downloadAndInstallUpdate();
+          }
+        });
+      }
+    });
   }
 });
 
 // Verificar actualizaciones al iniciar
 chrome.runtime.onStartup.addListener(() => {
-  checkForUpdates();
+  checkForUpdates().then(hasUpdate => {
+    if (hasUpdate) {
+      // Verificar si el usuario eligió actualizaciones automáticas
+      chrome.storage.local.get(['autoUpdate'], result => {
+        if (result.autoUpdate) {
+          // Realizar actualización automática
+          downloadAndInstallUpdate();
+        }
+      });
+    }
+  });
+});
+
+// También verificar al instalar/actualizar
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === 'update' || details.reason === 'install') {
+    setTimeout(() => {
+      checkForUpdates();
+    }, 5000); // Esperar 5 segundos después de la instalación
+  }
 });
 
 // Escuchar clic en la notificación de actualización (solo si el API está disponible)
 if (chrome.notifications && chrome.notifications.onButtonClicked) {
   chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
-    if (buttonIndex === 0) {
-      chrome.tabs.create({
-        url: 'https://github.com/fvnks/proxy-scraper-extension/releases'
-      });
+    if (notificationId === 'update-notification') {
+      if (buttonIndex === 0) {
+        // Actualizar ahora
+        downloadAndInstallUpdate();
+      } else if (buttonIndex === 1) {
+        // Configurar actualizaciones automáticas
+        chrome.storage.local.set({ autoUpdate: true });
+        downloadAndInstallUpdate();
+      }
     }
   });
 } 
