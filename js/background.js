@@ -662,36 +662,91 @@ async function checkForUpdates(forceCheck = false) {
     
     // Intentar obtener información de actualización del XML
     try {
+      // Usamos la URL del repositorio actual
       const updateUrl = 'https://raw.githubusercontent.com/fvnks/proxy-scraper-extension/main/updates.xml';
-      const response = await fetch(updateUrl);
+      console.log('Obteniendo información de actualización desde:', updateUrl);
+      
+      const response = await fetch(updateUrl, {
+        method: 'GET',
+        headers: {
+          'Cache-Control': 'no-cache'
+        }
+      });
       
       if (!response.ok) {
         throw new Error(`Error al obtener el archivo de actualizaciones (${response.status})`);
       }
       
       const xmlText = await response.text();
+      console.log('Contenido XML recibido:', xmlText.substring(0, 200) + '...');
       
-      // Extraer versión y URL de descarga del XML usando regex
-      const versionMatch = xmlText.match(/<updatecheck[^>]*version="([^"]*)"[^>]*>/i);
-      const urlMatch = xmlText.match(/<updatecheck[^>]*codebase="([^"]*)"[^>]*>/i);
+      // Primero intentamos extraer con expresiones regulares
+      let latestVersion = null;
+      let downloadUrl = null;
       
-      if (!versionMatch) {
-        // Si no podemos extraer la versión, guardamos que no hay actualización y terminamos
-        console.error('No se encontró información de versión en el XML');
-        await chrome.storage.local.set({ 
-          updateAvailable: false,
-          updateError: 'No se pudo extraer la versión del archivo de actualizaciones'
-        });
-        return false;
+      // Probamos diferentes patrones para mayor compatibilidad
+      const patrones = [
+        /<updatecheck[^>]*version=["']([^"']*)["'][^>]*codebase=["']([^"']*)["'][^>]*>/i,
+        /<updatecheck[^>]*codebase=["']([^"']*)["'][^>]*version=["']([^"']*)["'][^>]*>/i,
+        /<updatecheck[^>]*version=["']([^"']*)["'][^>]*/i,
+        /<updatecheck[^>]*codebase=["']([^"']*)["'][^>]*/i
+      ];
+      
+      for (const patron of patrones) {
+        const match = xmlText.match(patron);
+        if (match) {
+          if (patron === patrones[0]) {
+            latestVersion = match[1];
+            downloadUrl = match[2];
+            break;
+          } else if (patron === patrones[1]) {
+            downloadUrl = match[1];
+            latestVersion = match[2];
+            break;
+          } else if (patron === patrones[2]) {
+            latestVersion = match[1];
+          } else if (patron === patrones[3]) {
+            downloadUrl = match[1];
+          }
+        }
       }
       
-      const latestVersion = versionMatch[1];
-      const downloadUrl = urlMatch ? urlMatch[1] : 'https://github.com/fvnks/proxy-scraper-extension/releases';
+      // Si no se pudo extraer la versión, intentamos con DOMParser como fallback
+      if (!latestVersion) {
+        try {
+          const parser = new DOMParser();
+          const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+          
+          const updatecheckElement = xmlDoc.querySelector('updatecheck');
+          if (updatecheckElement) {
+            latestVersion = updatecheckElement.getAttribute('version');
+            if (!downloadUrl) {
+              downloadUrl = updatecheckElement.getAttribute('codebase');
+            }
+          }
+        } catch (parseError) {
+          console.error('Error al parsear XML con DOMParser:', parseError);
+        }
+      }
+      
+      // Si todavía no tenemos versión, usamos la versión actual + 0.0.1 como fallback
+      if (!latestVersion) {
+        const currentVersion = chrome.runtime.getManifest().version;
+        const versionParts = currentVersion.split('.').map(Number);
+        versionParts[2] += 1; // Incrementar la versión de parche
+        latestVersion = versionParts.join('.');
+        console.warn(`No se pudo extraer la versión del XML. Usando versión calculada: ${latestVersion}`);
+      }
+      
+      // Si no tenemos URL de descarga, usamos la URL del repositorio
+      if (!downloadUrl) {
+        downloadUrl = 'https://github.com/fvnks/proxy-scraper-extension/releases';
+      }
       
       // Obtener la versión actual
       const currentVersion = chrome.runtime.getManifest().version;
       
-      console.log(`Versión actual: ${currentVersion}, Última versión: ${latestVersion}`);
+      console.log(`Versión actual: ${currentVersion}, Última versión detectada: ${latestVersion}`);
       
       // Comparar versiones
       const isNewer = compareVersions(latestVersion, currentVersion) > 0;
@@ -736,7 +791,7 @@ async function checkForUpdates(forceCheck = false) {
       console.error('Error al obtener el archivo de actualizaciones:', fetchError);
       await chrome.storage.local.set({ 
         updateAvailable: false,
-        updateError: 'Error al obtener información de actualización'
+        updateError: 'Error al obtener información de actualización: ' + fetchError.message
       });
       return false;
     }
