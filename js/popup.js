@@ -199,15 +199,19 @@ document.addEventListener('DOMContentLoaded', () => {
   // Función para actualizar manualmente
   async function updateManually() {
     try {
-      // Enviar mensaje al background para descargar e instalar la actualización
+      updateStatus('Actualizando...', 'searching', 'Abriendo página de descarga...');
+      
+      // Enviar mensaje al background para abrir la página de descarga
       const result = await chrome.runtime.sendMessage({ action: 'downloadAndInstallUpdate' });
+      
       if (result) {
-        // La ventana se abrirá automáticamente con la página de descarga
-        updateStatus('Actualizando...', 'searching', 'Descargando nueva versión...');
+        updateStatus('Redirigiéndote...', 'searching', 'Abriendo página de GitHub para la descarga manual');
+      } else {
+        updateStatus('Error', 'error', 'No se pudo abrir la página de descarga');
       }
     } catch (error) {
       console.error('Error al actualizar:', error);
-      updateStatus('Error', 'error', 'No se pudo descargar la actualización');
+      updateStatus('Error', 'error', 'No se pudo iniciar la actualización');
     }
   }
 

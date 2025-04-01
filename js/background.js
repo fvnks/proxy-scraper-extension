@@ -908,6 +908,11 @@ async function checkForUpdates(forceCheck = false) {
         downloadUrl = 'https://github.com/fvnks/proxy-scraper-extension/releases';
       }
       
+      // Si la URL apunta a un archivo .crx que podría no existir, usar la URL general de releases
+      if (downloadUrl.includes('.crx')) {
+        downloadUrl = 'https://github.com/fvnks/proxy-scraper-extension/releases';
+      }
+      
       // Obtener la versión actual
       const currentVersion = chrome.runtime.getManifest().version;
       
@@ -990,15 +995,22 @@ function compareVersions(v1, v2) {
 // Función para descargar e instalar la actualización
 async function downloadAndInstallUpdate() {
   try {
+    // Siempre dirigir al usuario a la página de releases en GitHub
+    const releasesUrl = 'https://github.com/fvnks/proxy-scraper-extension/releases';
+    
+    // Obtener la URL de descarga almacenada (si existe)
     const updateInfo = await chrome.storage.local.get(['downloadUrl']);
-    if (updateInfo.downloadUrl) {
-      // Abrir página de descarga en una nueva pestaña
-      chrome.tabs.create({ url: updateInfo.downloadUrl });
-      return true;
-    }
-    return false;
+    
+    // Usar la URL almacenada o la URL predeterminada de releases
+    const downloadUrl = (updateInfo.downloadUrl && updateInfo.downloadUrl.includes('github.com')) 
+      ? updateInfo.downloadUrl 
+      : releasesUrl;
+    
+    // Abrir página de releases en una nueva pestaña
+    chrome.tabs.create({ url: downloadUrl });
+    return true;
   } catch (error) {
-    console.error('Error al descargar actualización:', error);
+    console.error('Error al dirigir a la página de actualización:', error);
     return false;
   }
 }

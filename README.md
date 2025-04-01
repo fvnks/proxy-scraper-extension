@@ -1,51 +1,89 @@
 # Proxy Scraper y Gestor
 
-Una extensión de Chrome para buscar, verificar y gestionar proxies HTTP.
+Una extensión para Chrome que te permite buscar, verificar y gestionar proxies HTTP para eludir restricciones web.
 
 ## Características
 
-- Búsqueda automática de proxies de múltiples fuentes
-- Verificación de proxies en tiempo real
-- Muestra la ubicación geográfica de cada proxy
-- Rotación automática de proxies
-- Interfaz intuitiva y fácil de usar
-- Verificación de actualizaciones automática
+- Búsqueda automática de proxies de fuentes confiables
+- Verificación automática del funcionamiento de cada proxy
+- Información detallada de la ubicación de cada proxy
+- Rotación automática de proxies en intervalos configurables
+- Interfaz intuitiva con indicadores de estado
+- Identificación de país con banderas
+- Sistema de actualizaciones automáticas
 
 ## Instalación
 
-1. Clona este repositorio:
-```bash
-git clone https://github.com/fvnks/proxy-scraper-extension.git
-```
+### Desde Chrome Web Store (Recomendado)
 
-2. Abre Chrome y ve a `chrome://extensions/`
-3. Activa el "Modo desarrollador"
-4. Haz clic en "Cargar descomprimida" y selecciona la carpeta `proxy-scraper-extension`
+1. Visita la [página de la extensión en Chrome Web Store](#) (Proximamente)
+2. Haz clic en "Añadir a Chrome"
+
+### Instalación Manual
+
+1. Descarga la última versión desde la [página de releases](https://github.com/fvnks/proxy-scraper-extension/releases)
+2. Descomprime el archivo ZIP
+3. Abre Chrome y navega a `chrome://extensions/`
+4. Activa el "Modo desarrollador" con el interruptor en la esquina superior derecha
+5. Haz clic en "Cargar descomprimida" y selecciona la carpeta descomprimida
 
 ## Uso
 
 1. Haz clic en el icono de la extensión en la barra de herramientas
-2. Usa el botón "Buscar Nuevos Proxies" para encontrar proxies
-3. Selecciona un proxy de la lista para conectarte
-4. Usa el botón "Desconectar Proxy" para volver a conexión directa
-5. Activa la "Rotación Automática" para cambiar de proxy periódicamente
+2. Usa el botón "Buscar Proxies" para encontrar servidores proxy disponibles
+3. Haz clic en cualquier proxy de la lista para conectarte
+4. Activa la rotación automática para cambiar periódicamente entre proxies
 
-## Actualizaciones
+## Desarrollo
 
-La extensión verifica automáticamente si hay nuevas versiones disponibles. Cuando se encuentra una actualización, se mostrará una notificación.
+### Requisitos
 
-## Autor
+- Node.js (para el empaquetado)
+- npm (para las dependencias de desarrollo)
 
-Desarrollado por **Rodrigo Droguett Stahr** ([@fvnks](https://github.com/fvnks))
+### Configuración para desarrollo
 
-Si te gusta esta extensión, considera:
-- ⭐ Darle una estrella al repositorio
-- 🐛 Reportar errores que encuentres
-- 💡 Sugerir nuevas funcionalidades
+1. Clona este repositorio:
+   ```
+   git clone https://github.com/fvnks/proxy-scraper-extension.git
+   cd proxy-scraper-extension
+   ```
 
-## Contribuir
+2. Instala las dependencias de desarrollo (si necesitas empaquetar como CRX):
+   ```
+   npm install -g crx
+   ```
 
-Las contribuciones son bienvenidas. Por favor, abre un issue primero para discutir los cambios que te gustaría hacer.
+3. Carga la extensión en Chrome:
+   - Abre Chrome y ve a `chrome://extensions/`
+   - Activa el "Modo desarrollador"
+   - Haz clic en "Cargar descomprimida" y selecciona la carpeta del repositorio
+
+### Empaquetado de la extensión
+
+Para crear un paquete ZIP y actualizar el archivo updates.xml:
+
+```
+./manual-package.sh
+```
+
+Para crear un archivo CRX (requiere Node.js y el paquete crx):
+
+```
+node create-crx.js
+```
+
+## Proceso de publicación
+
+1. Actualiza la versión en `manifest.json`
+2. Ejecuta `./manual-package.sh` para crear el paquete ZIP y actualizar updates.xml
+3. Ejecuta `node create-crx.js` para crear el archivo CRX
+4. Crea un nuevo release en GitHub:
+   - Tag: v{versión} (ej. v1.0.5)
+   - Título: Version {versión}
+   - Descripción: Cambios y mejoras
+   - Archivos adjuntos: ZIP y CRX generados
+5. Publica el release
 
 ## Licencia
 
