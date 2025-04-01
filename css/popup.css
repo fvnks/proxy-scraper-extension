@@ -394,4 +394,66 @@ button.warning:hover {
   0% { transform: scale(1); }
   50% { transform: scale(1.1); }
   100% { transform: scale(1); }
+}
+
+/* Sección de actualización */
+.update-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  margin-bottom: 10px;
+}
+
+.version-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  color: #7f8c8d;
+}
+
+#updateLink {
+  color: #3498db;
+  text-decoration: none;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+#updateLink:hover {
+  color: #2980b9;
+  text-decoration: underline;
+}
+
+#updateLink i {
+  font-size: 12px;
+}
+
+#checkUpdateBtn {
+  background-color: #3498db;
+}
+
+#checkUpdateBtn:hover {
+  background-color: #2980b9;
+}
+
+#checkUpdateBtn.checking {
+  background-color: #7f8c8d;
+  cursor: wait;
+}
+
+/* Animación de actualización */
+@keyframes checking {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+#checkUpdateBtn.checking i {
+  animation: checking 1s linear infinite;
 } 

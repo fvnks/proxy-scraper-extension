@@ -20,46 +20,17 @@ const PROXY_SOURCES = [
 
 // Almacenamiento de proxies funcionando
 let workingProxies = [];
-let currentProxyIndex = -1; // Inicialmente sin proxy
+let currentProxyIndex = 0;
 let autoRotateInterval = null;
 let proxyStatus = 'gray'; // gray, yellow, red, green
 
 // Inicializar extensión
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.get(['workingProxies', 'currentProxyIndex', 'autoRotate', 'rotationInterval'], (result) => {
+  chrome.storage.local.get(['workingProxies', 'autoRotate', 'rotationInterval'], (result) => {
     if (result.workingProxies) {
       workingProxies = result.workingProxies;
+      updateIconColor();
     }
-    
-    if (result.currentProxyIndex !== undefined) {
-      currentProxyIndex = result.currentProxyIndex;
-      // Restaurar la configuración del proxy
-      updateProxyConfig();
-    }
-    
-    updateIconColor();
-    
-    if (result.autoRotate) {
-      startAutoRotation(result.rotationInterval || 5);
-    }
-  });
-});
-
-// También restaurar al inicio del navegador
-chrome.runtime.onStartup.addListener(() => {
-  chrome.storage.local.get(['workingProxies', 'currentProxyIndex', 'autoRotate', 'rotationInterval'], (result) => {
-    if (result.workingProxies) {
-      workingProxies = result.workingProxies;
-    }
-    
-    if (result.currentProxyIndex !== undefined) {
-      currentProxyIndex = result.currentProxyIndex;
-      // Restaurar la configuración del proxy
-      updateProxyConfig();
-    }
-    
-    updateIconColor();
-    
     if (result.autoRotate) {
       startAutoRotation(result.rotationInterval || 5);
     }
@@ -94,8 +65,14 @@ async function updateIconColor() {
 
 // Verificar si el proxy actual está funcionando
 async function checkProxyStatus() {
-  if (workingProxies.length === 0 || currentProxyIndex === -1 || currentProxyIndex >= workingProxies.length) {
+  if (workingProxies.length === 0) {
     proxyStatus = 'gray';
+    updateIconColor();
+    return;
+  }
+
+  if (currentProxyIndex === -1) {
+    proxyStatus = 'yellow';
     updateIconColor();
     return;
   }
@@ -342,14 +319,11 @@ function stopAutoRotation() {
 
 // Actualizar configuración del proxy
 function updateProxyConfig() {
-  if (workingProxies.length === 0 || currentProxyIndex === -1 || currentProxyIndex >= workingProxies.length) {
-    // No hay proxies o índice inválido, configurar a modo directo
+  if (workingProxies.length === 0) {
     chrome.proxy.settings.set({
       value: { mode: "direct" },
       scope: "regular"
     });
-    proxyStatus = 'gray';
-    updateIconColor();
     return;
   }
   
@@ -369,13 +343,6 @@ function updateProxyConfig() {
     },
     scope: "regular"
   });
-  
-  // Actualizar el estado al conectar
-  proxyStatus = 'green';
-  updateIconColor();
-  
-  // Guardar el índice actual en el almacenamiento local
-  chrome.storage.local.set({ currentProxyIndex });
 }
 
 // Manejar errores de proxy
@@ -396,19 +363,13 @@ chrome.proxy.onProxyError.addListener((details) => {
 
 // Desconectar del proxy actual
 async function disconnectProxy() {
-  if (currentProxyIndex !== -1 && currentProxyIndex < workingProxies.length) {
-    // El proxy actual es válido, lo desconectamos
-    currentProxyIndex = -1;
-    proxyStatus = 'gray';
-    
-    // Guardar el cambio en el almacenamiento local
-    await chrome.storage.local.set({ currentProxyIndex });
-    
-    // Actualizar la configuración del proxy (conectará en modo directo)
-    updateProxyConfig();
-    return true;
-  }
-  return false;
+  workingProxies = workingProxies.filter(p => p.proxy !== workingProxies[currentProxyIndex]?.proxy);
+  currentProxyIndex = -1;
+  proxyStatus = 'gray';
+  await chrome.storage.local.set({ workingProxies });
+  updateProxyConfig();
+  updateIconColor();
+  return true;
 }
 
 // Limpiar proxies inactivos
@@ -455,6 +416,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'disconnectProxy':
       disconnectProxy().then(sendResponse);
       return true;
+    case 'checkForUpdates':
+      checkForUpdates(request.forceCheck || false).then(result => {
+        sendResponse(result);
+      }).catch(error => {
+        console.error('Error al verificar actualizaciones:', error);
+        sendResponse(false);
+      });
+      return true;
+    case 'downloadAndInstallUpdate':
+      downloadAndInstallUpdate().then(result => {
+        sendResponse(result);
+      }).catch(error => {
+        console.error('Error al descargar actualización:', error);
+        sendResponse(false);
+      });
+      return true;
   }
 });
 
@@ -463,11 +440,6 @@ async function setCurrentProxy(proxy) {
   const index = workingProxies.findIndex(p => p.proxy === proxy.proxy);
   if (index !== -1) {
     currentProxyIndex = index;
-    
-    // Guardar el índice actual en el almacenamiento local
-    await chrome.storage.local.set({ currentProxyIndex });
-    
-    // Actualizar la configuración del proxy
     updateProxyConfig();
     await checkProxyStatus();
     return true;
@@ -475,150 +447,137 @@ async function setCurrentProxy(proxy) {
   return false;
 }
 
-// Verificar actualizaciones
-async function checkForUpdates() {
+// Función para verificar actualizaciones
+async function checkForUpdates(forceCheck = false) {
   try {
-    console.log("Verificando actualizaciones...");
-    const response = await fetch('https://raw.githubusercontent.com/fvnks/proxy-scraper-extension/main/updates.xml');
+    console.log('Verificando actualizaciones...');
+    
+    // Si no es una verificación forzada, verificamos si ya revisamos actualizaciones hoy
+    if (!forceCheck) {
+      const lastCheck = await chrome.storage.local.get('lastUpdateCheck');
+      if (lastCheck.lastUpdateCheck) {
+        const lastCheckDate = new Date(lastCheck.lastUpdateCheck);
+        const now = new Date();
+        // Si ya revisamos hoy, no volvemos a verificar
+        if (lastCheckDate.toDateString() === now.toDateString() && !forceCheck) {
+          console.log('Ya se verificaron actualizaciones hoy.');
+          return;
+        }
+      }
+    }
+    
+    // Guardamos la fecha de última verificación
+    await chrome.storage.local.set({ lastUpdateCheck: new Date().toISOString() });
+    
+    const updateUrl = 'https://raw.githubusercontent.com/rodrigod/proxy-scraper-extension/main/updates.xml';
+    const response = await fetch(updateUrl);
     const xmlText = await response.text();
+    
+    // Parsear el XML
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
     
-    const updateCheck = xmlDoc.querySelector('updatecheck');
-    if (updateCheck) {
-      const latestVersion = updateCheck.getAttribute('version');
-      const currentVersion = chrome.runtime.getManifest().version;
-      const downloadUrl = updateCheck.getAttribute('codebase');
+    // Obtener la versión más reciente
+    const updatecheck = xmlDoc.querySelector('updatecheck');
+    if (!updatecheck) throw new Error('No se encontró información de actualización');
+    
+    const latestVersion = updatecheck.getAttribute('version');
+    const downloadUrl = updatecheck.getAttribute('codebase');
+    
+    if (!latestVersion) throw new Error('No se encontró versión en el archivo de actualización');
+    
+    // Obtener la versión actual
+    const currentVersion = chrome.runtime.getManifest().version;
+    
+    console.log(`Versión actual: ${currentVersion}, Última versión: ${latestVersion}`);
+    
+    // Comparar versiones (simple por ahora, podría mejorarse con semver)
+    const isNewer = compareVersions(latestVersion, currentVersion) > 0;
+    
+    if (isNewer) {
+      console.log('¡Hay una nueva versión disponible!');
       
-      console.log(`Versión actual: ${currentVersion}, Última versión: ${latestVersion}`);
+      // Guardar información de actualización
+      await chrome.storage.local.set({ 
+        updateAvailable: true, 
+        latestVersion: latestVersion,
+        downloadUrl: downloadUrl
+      });
       
-      if (latestVersion && latestVersion !== currentVersion) {
-        // Guardar la información de actualización en almacenamiento local
-        await chrome.storage.local.set({ 
-          updateAvailable: true,
-          latestVersion: latestVersion,
-          downloadUrl: downloadUrl
+      // Mostrar notificación solo si es una verificación automática
+      if (!forceCheck) {
+        chrome.notifications.create('update-available', {
+          type: 'basic',
+          iconUrl: '/icons/icon128.png',
+          title: 'Actualización Disponible',
+          message: `Hay una nueva versión disponible (v${latestVersion}). Haz clic para actualizar.`,
+          buttons: [
+            { title: 'Ver actualización' }
+          ]
         });
-        
-        // Verificar que el API de notificaciones esté disponible
-        if (chrome.notifications) {
-          // Mostrar notificación de actualización
-          chrome.notifications.create('update-notification', {
-            type: 'basic',
-            iconUrl: 'icons/icon128.png',
-            title: 'Nueva versión disponible',
-            message: `Hay una nueva versión (${latestVersion}) de Proxy Scraper y Gestor disponible.`,
-            buttons: [
-              { title: 'Actualizar ahora' },
-              { title: 'Actualizar automáticamente' }
-            ],
-            priority: 2,
-            requireInteraction: true
-          });
-        } else {
-          console.log(`Nueva versión disponible: ${latestVersion}`);
-        }
-        
-        // Cambiar el color del icono para indicar que hay una actualización
-        proxyStatus = 'yellow';
-        updateIconColor();
-        
-        return true;
-      } else {
-        await chrome.storage.local.set({ updateAvailable: false });
-        return false;
       }
+    } else {
+      console.log('Estás usando la versión más reciente.');
+      await chrome.storage.local.set({ updateAvailable: false });
     }
+    
+    return isNewer;
   } catch (error) {
     console.error('Error al verificar actualizaciones:', error);
     return false;
   }
 }
 
-// Descargar e instalar actualización
+// Función para comparar versiones (retorna 1 si v1 > v2, -1 si v1 < v2, 0 si son iguales)
+function compareVersions(v1, v2) {
+  const parts1 = v1.split('.').map(Number);
+  const parts2 = v2.split('.').map(Number);
+  
+  for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+    const part1 = parts1[i] || 0;
+    const part2 = parts2[i] || 0;
+    
+    if (part1 > part2) return 1;
+    if (part1 < part2) return -1;
+  }
+  
+  return 0;
+}
+
+// Función para descargar e instalar la actualización
 async function downloadAndInstallUpdate() {
   try {
     const updateInfo = await chrome.storage.local.get(['downloadUrl']);
     if (updateInfo.downloadUrl) {
-      // Abrir la página de descarga en una nueva pestaña
-      chrome.tabs.create({
-        url: updateInfo.downloadUrl
-      });
-      
-      // Mostrar instrucciones de instalación
-      if (chrome.notifications) {
-        chrome.notifications.create('install-instructions', {
-          type: 'basic',
-          iconUrl: 'icons/icon128.png',
-          title: 'Instrucciones de instalación',
-          message: 'Descarga la nueva versión y arrastra el archivo .crx a la página de extensiones de Chrome para instalarla. Si tienes problemas, descomprime el archivo y usa "Cargar descomprimida".',
-          priority: 2
-        });
-      }
-      
+      // Abrir página de descarga en una nueva pestaña
+      chrome.tabs.create({ url: updateInfo.downloadUrl });
       return true;
     }
     return false;
   } catch (error) {
-    console.error('Error al descargar la actualización:', error);
+    console.error('Error al descargar actualización:', error);
     return false;
   }
 }
 
-// Verificar actualizaciones cada 6 horas en lugar de 24
-chrome.alarms.create('checkUpdates', { periodInMinutes: 360 });
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'checkUpdates') {
-    checkForUpdates().then(hasUpdate => {
-      if (hasUpdate) {
-        // Verificar si el usuario eligió actualizaciones automáticas
-        chrome.storage.local.get(['autoUpdate'], result => {
-          if (result.autoUpdate) {
-            // Realizar actualización automática
-            downloadAndInstallUpdate();
-          }
-        });
-      }
-    });
+// Establece un intervalo para verificar actualizaciones (cada 24 horas)
+chrome.alarms.create('checkUpdateAlarm', {
+  periodInMinutes: 24 * 60 // 24 horas
+});
+
+// Listener para verificar actualizaciones cuando se activa la alarma
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === 'checkUpdateAlarm') {
+    checkForUpdates();
+  }
+});
+
+// Listener para el clic en la notificación
+chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
+  if (notificationId === 'update-available' && buttonIndex === 0) {
+    downloadAndInstallUpdate();
   }
 });
 
 // Verificar actualizaciones al iniciar
-chrome.runtime.onStartup.addListener(() => {
-  checkForUpdates().then(hasUpdate => {
-    if (hasUpdate) {
-      // Verificar si el usuario eligió actualizaciones automáticas
-      chrome.storage.local.get(['autoUpdate'], result => {
-        if (result.autoUpdate) {
-          // Realizar actualización automática
-          downloadAndInstallUpdate();
-        }
-      });
-    }
-  });
-});
-
-// También verificar al instalar/actualizar
-chrome.runtime.onInstalled.addListener((details) => {
-  if (details.reason === 'update' || details.reason === 'install') {
-    setTimeout(() => {
-      checkForUpdates();
-    }, 5000); // Esperar 5 segundos después de la instalación
-  }
-});
-
-// Escuchar clic en la notificación de actualización (solo si el API está disponible)
-if (chrome.notifications && chrome.notifications.onButtonClicked) {
-  chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
-    if (notificationId === 'update-notification') {
-      if (buttonIndex === 0) {
-        // Actualizar ahora
-        downloadAndInstallUpdate();
-      } else if (buttonIndex === 1) {
-        // Configurar actualizaciones automáticas
-        chrome.storage.local.set({ autoUpdate: true });
-        downloadAndInstallUpdate();
-      }
-    }
-  });
-} 
+checkForUpdates(); 

@@ -15,6 +15,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const loadingElement = document.getElementById('loading');
   const loadingText = document.getElementById('loadingText');
   const updateAvailableBadge = document.getElementById('updateAvailableBadge');
+  const checkUpdateBtn = document.getElementById('checkUpdateBtn');
+  const currentVersionElement = document.getElementById('currentVersion');
+  const updateLink = document.getElementById('updateLink');
+  const latestVersionElement = document.getElementById('latestVersion');
 
   // Función para obtener la bandera del país basada en el código ISO
   function getCountryFlag(countryCode) {
@@ -85,15 +89,67 @@ document.addEventListener('DOMContentLoaded', () => {
     statusDisplay.classList.add(`status-${status}`);
   }
 
-  // Verificar si hay actualizaciones disponibles
-  async function checkForUpdates() {
+  // Función para verificar actualizaciones manualmente
+  async function checkForUpdatesManually() {
+    checkUpdateBtn.classList.add('checking');
+    checkUpdateBtn.disabled = true;
+    checkUpdateBtn.innerHTML = '<i class="fas fa-sync"></i> Verificando...';
+    
     try {
-      const updateInfo = await chrome.storage.local.get(['updateAvailable', 'latestVersion']);
+      // Enviar mensaje al background para verificar actualizaciones
+      await chrome.runtime.sendMessage({ action: 'checkForUpdates', forceCheck: true });
+      
+      // Obtener el resultado después de un breve retraso
+      setTimeout(async () => {
+        await updateVersionInfo();
+        checkUpdateBtn.classList.remove('checking');
+        checkUpdateBtn.disabled = false;
+        checkUpdateBtn.innerHTML = '<i class="fas fa-sync"></i> Verificar Actualizaciones';
+      }, 1500);
+    } catch (error) {
+      console.error('Error al verificar actualizaciones:', error);
+      checkUpdateBtn.classList.remove('checking');
+      checkUpdateBtn.disabled = false;
+      checkUpdateBtn.innerHTML = '<i class="fas fa-sync"></i> Verificar Actualizaciones';
+    }
+  }
+
+  // Función para actualizar manualmente
+  async function updateManually() {
+    try {
+      // Enviar mensaje al background para descargar e instalar la actualización
+      const result = await chrome.runtime.sendMessage({ action: 'downloadAndInstallUpdate' });
+      if (result) {
+        // La ventana se abrirá automáticamente con la página de descarga
+        updateStatus('Actualizando...', 'searching', 'Descargando nueva versión...');
+      }
+    } catch (error) {
+      console.error('Error al actualizar:', error);
+      updateStatus('Error', 'error', 'No se pudo descargar la actualización');
+    }
+  }
+
+  // Verificar si hay actualizaciones disponibles y actualizar la interfaz
+  async function updateVersionInfo() {
+    try {
+      // Obtener la versión actual
+      const manifest = chrome.runtime.getManifest();
+      currentVersionElement.textContent = manifest.version;
+      
+      // Verificar si hay una actualización disponible
+      const updateInfo = await chrome.storage.local.get(['updateAvailable', 'latestVersion', 'downloadUrl']);
+      
       if (updateInfo.updateAvailable) {
         updateAvailableBadge.style.display = 'inline-block';
         updateAvailableBadge.textContent = `Nueva v${updateInfo.latestVersion}`;
+        
+        // Mostrar enlace de actualización
+        latestVersionElement.textContent = updateInfo.latestVersion;
+        updateLink.style.display = 'flex';
+        updateLink.setAttribute('data-url', updateInfo.downloadUrl);
       } else {
         updateAvailableBadge.style.display = 'none';
+        updateLink.style.display = 'none';
       }
     } catch (error) {
       console.error('Error al verificar actualizaciones:', error);
@@ -105,7 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const status = await chrome.runtime.sendMessage({ action: 'getStatus' });
     
     // Verificar actualizaciones
-    await checkForUpdates();
+    await updateVersionInfo();
     
     // Actualizar estado y contador
     let statusMessage = 'Listo';
@@ -280,6 +336,15 @@ document.addEventListener('DOMContentLoaded', () => {
     await updateUI();
   });
 
+  // Evento para verificar actualizaciones manualmente
+  checkUpdateBtn.addEventListener('click', checkForUpdatesManually);
+  
+  // Evento para actualizar manualmente
+  updateLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    updateManually();
+  });
+
   autoRotateCheckbox.addEventListener('change', async () => {
     const enabled = autoRotateCheckbox.checked;
     rotationIntervalInput.disabled = !enabled;
@@ -312,7 +377,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Actualizar la interfaz al cargar
   updateUI();
-
-  // Verificar actualizaciones
-  checkForUpdates();
 }); 
