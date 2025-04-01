@@ -1,0 +1,189 @@
+body {
+  width: 400px;
+  padding: 15px;
+  font-family: Arial, sans-serif;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+h2 {
+  margin: 0;
+  color: #333;
+  text-align: center;
+}
+
+.current-proxy {
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 10px;
+}
+
+.proxy-box {
+  background-color: white;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.proxy-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.proxy-address {
+  font-weight: bold;
+  color: #2c3e50;
+}
+
+.proxy-ip {
+  font-size: 0.9em;
+  color: #666;
+}
+
+.proxy-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #dc3545;
+}
+
+.status-indicator.active {
+  background-color: #28a745;
+}
+
+.status-text {
+  font-size: 0.9em;
+  color: #666;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+button {
+  padding: 8px 16px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+button:hover {
+  background-color: #45a049;
+}
+
+.proxy-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 10px;
+}
+
+.proxy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.proxy-item {
+  background-color: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.proxy-item:hover {
+  background-color: #f0f0f0;
+  border-color: #4CAF50;
+}
+
+.proxy-item.active {
+  background-color: #e8f5e9;
+  border-color: #4CAF50;
+}
+
+.proxy-item .proxy-address {
+  font-weight: bold;
+  color: #2c3e50;
+}
+
+.proxy-item .proxy-ip {
+  font-size: 0.8em;
+  color: #666;
+}
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background-color: #f8f9fa;
+  padding: 12px;
+  border-radius: 6px;
+}
+
+.settings label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status {
+  background-color: #f5f5f5;
+  padding: 10px;
+  border-radius: 4px;
+  margin-top: 10px;
+}
+
+#status {
+  font-weight: bold;
+}
+
+#proxyCount {
+  font-weight: bold;
+  color: #4CAF50;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+} 
